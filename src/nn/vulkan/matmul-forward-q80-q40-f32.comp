@@ -1,0 +1,111 @@
+#version 450
+
+#extension GL_EXT_control_flow_attributes : enable
+#extension GL_EXT_shader_16bit_storage : enable
+#extension GL_EXT_shader_explicit_arithmetic_types : enable
+
+#define Q80_Q40_BLOCK_SIZE 32
+#define N_THREADS 256
+
+#define GROUP_SIZE 64
+#define N_THREADS_PER_GROUP (N_THREADS / GROUP_SIZE)
+
+layout(local_size_x = N_THREADS, local_size_y = 1, local_size_z = 1) in;
+
+struct BatchInfo {
+    uint inputOffset;
+    uint inputSizeX;
+    uint outputOffset;
+    uint outputSizeX;
+};
+
+struct BlockQ80 {
+    float16_t d;
+    int8_t qs[Q80_Q40_BLOCK_SIZE];
+};
+
+struct BlockQ40 {
+    float16_t d;
+    uint8_t qs[Q80_Q40_BLOCK_SIZE / 2];
+};
+
+layout(binding = 0) readonly buffer inputBuffer { BlockQ80 x[]; };
+layout(binding = 1) writeonly buffer outputBuffer { float y[]; };
+layout(binding = 2) readonly buffer batchInfosBuffer { BatchInfo infos[]; };
+layout(binding = 3) readonly buffer weightBuffer { BlockQ40 weight[]; };
+
+shared uint sharedStart;
+shared uint sharedEnd;
+shared uint sharedInputOffset;
+shared uint sharedInputSizeX;
+shared uint sharedOutputOffset;
+shared uint sharedInputSizeXPerGroup;
+shared float16_t sums[N_THREADS];
+
+void main() {
+    const uint threadIndex = gl_LocalInvocationID.x;
+
+    if (threadIndex == 0) {
+        const uint nWorkGroups = gl_NumWorkGroups.z;
+        const uint batchIndex = gl_WorkGroupID.y;
+        const uint workGroupIndex = gl_WorkGroupID.z;
+
+        sharedInputOffset = infos[batchIndex].inputOffset;
+        sharedInputSizeX = infos[batchIndex].inputSizeX;
+        sharedOutputOffset = infos[batchIndex].outputOffset;
+        sharedInputSizeXPerGroup = (sharedInputSizeX + N_THREADS_PER_GROUP - 1) / N_THREADS_PER_GROUP;
+
+        const uint ySlice = infos[batchIndex].outputSizeX / nWorkGroups;
+        const uint yRest = infos[batchIndex].outputSizeX % nWorkGroups;
+        sharedStart = workGroupIndex * ySlice + (workGroupIndex < yRest ? workGroupIndex : yRest);
+        sharedEnd = sharedStart + ySlice + (workGroupIndex < yRest ? 1 : 0);
+    }
+
+    barrier();
+    memoryBarrierShared();
+
+    const uint dEnd = sharedEnd;
+    const uint inputOffset = sharedInputOffset;
+    const uint inputSizeX = sharedInputSizeX;
+    const uint outputOffset = sharedOutputOffset;
+    const uint inputSizeXPerGroup = sharedInputSizeXPerGroup;
+
+    const uint dGroup = threadIndex / N_THREADS_PER_GROUP;
+    const uint iGroup = threadIndex % N_THREADS_PER_GROUP;
+    const uint iStart = inputSizeXPerGroup * iGroup;
+    const uint iEnd = min(iStart + inputSizeXPerGroup, inputSizeX);
+
+    for (uint dBatch = sharedStart; dBatch < dEnd; dBatch += GROUP_SIZE) {
+        const uint d = dBatch + dGroup;
+        if (d >= dEnd) {
+            break;
+        }
+
+        float16_t sum = float16_t(0.0f);
+        for (uint i = iStart; i < iEnd; i++) {
+            const uint xi = inputOffset + i;
+            const uint wi = d * inputSizeX + i;
+            [[unroll]] for (uint j = 0; j < Q80_Q40_BLOCK_SIZE / 2; j++) {
+                sum += (
+                    float16_t(x[xi].qs[j])                          * (float16_t(weight[wi].qs[j] & 0xF) - float16_t(8.0f)) +
+                    float16_t(x[xi].qs[j + Q80_Q40_BLOCK_SIZE / 2]) * (float16_t(weight[wi].qs[j] >>  4) - float16_t(8.0f))
+                ) * x[xi].d * weight[wi].d;
+            }
+        }
+        sums[threadIndex] = sum;
+
+        barrier();
+        memoryBarrierShared();
+
+        [[unroll]] for (uint i = N_THREADS_PER_GROUP / 2; i > 0; i >>= 1) {
+            if (iGroup < i)
+                sums[threadIndex] += sums[threadIndex + i];
+            barrier();
+        }
+        if (iGroup == 0) {
+            y[outputOffset + d] = float(sums[threadIndex]);
+        }
+
+        barrier();
+    }
+}
