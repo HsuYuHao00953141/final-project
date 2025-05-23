@@ -842,7 +842,7 @@ NnSize NnRootWeightLoader::loadRowMatmulSlices(const char *opName, NnUint opInde
         if(weight_index == 1)
             slice = &nodeConfigs[0].k_workload;
         if(weight_index == 2)
-            slice = &nodeConfigs[0].k_workload;
+            slice = &nodeConfigs[0].v_workload;
         if(weight_index == 4)
             slice = &nodeConfigs[0].w1_workload;
         if(weight_index == 6)
