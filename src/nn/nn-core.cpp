@@ -209,7 +209,6 @@ NnRowMatmulSlice sliceRowMatmul(NnFloatType type, NnUint nNodes, NnUint n, NnUin
     assert(d % nNodes == 0);
     s.type = type;
     s.nNodes = nNodes;
-    s.d = d;
     s.d0 = d / nNodes;
     s.n = n;
     s.size = size2D(type, s.n, d);

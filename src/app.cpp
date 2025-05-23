@@ -216,7 +216,7 @@ void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *cont
         throw std::runtime_error("Tokenizer vocab size does not match the model vocab size");
 
     Sampler sampler(header.vocabSize, args->temperature, args->topp, args->seed);
-    
+
     LlmNet net = buildLlmNet(&header, nNodes, args->nBatches);
     std::unique_ptr<LlmNet, void(*)(LlmNet *)> netPtr(&net, releaseLlmNet);
 

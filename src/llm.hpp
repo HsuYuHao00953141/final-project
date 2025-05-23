@@ -5,11 +5,6 @@
 #include "nn/nn-executor.hpp"
 #include "nn/nn-network.hpp"
 
-
-extern std::vector<NnUint> partitionDist;
-extern NnRopeSlice ropeSlice;
-//NnUint sliceOffset;
-
 enum LlmHeaderKey {
     VERSION = 0,
     ARCH_TYPE = 1,

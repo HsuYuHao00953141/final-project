@@ -437,9 +437,9 @@ void NnNetwork::writeMany(NnUint n, NnSocketIo *ios) {
         }
     } while (isWriting);
 }
-                        //要傳送的資料就是 data ，傳送長度是 size
+
 void NnNetwork::writeAll(void *data, NnSize size) {
-    std::vector<NnSocketIo> ios(nSockets);  //建立一個 socket 傳輸陣列 ios[]，每一個 NnSocketIo 對應一個 worker。
+    std::vector<NnSocketIo> ios(nSockets);
     for (NnUint i = 0; i < nSockets; i++) {
         NnSocketIo *io = &ios[i];
         io->socketIndex = i;
@@ -811,7 +811,6 @@ NnSize NnRootWeightLoader::loadAll(const char *opName, NnUint opIndex, NnSize nB
     return nBytes;
 }
 
-/*
 NnSize NnRootWeightLoader::loadRowMatmulSlices(const char *opName, NnUint opIndex, NnRowMatmulSlice *slice, NnByte *weight) {
     if (nNodes == 1) {
         executor->loadWeight(opName, opIndex, slice->sliceSize.nBytes, weight);
@@ -827,64 +826,7 @@ NnSize NnRootWeightLoader::loadRowMatmulSlices(const char *opName, NnUint opInde
     }
     return slice->size.nBytes;
 }
-*/
 
-
-
-NnSize NnRootWeightLoader::loadRowMatmulSlices(const char *opName, NnUint opIndex, NnNodeConfig *nodeConfigs, NnByte *weight, NnUint weight_index) {
-
-    NnRowMatmulSlice *slice = nullptr;
-
-    if (nNodes == 1) {
-
-        if(weight_index == 0)
-            slice = &nodeConfigs[0].q_workload;
-        if(weight_index == 1)
-            slice = &nodeConfigs[0].k_workload;
-        if(weight_index == 2)
-            slice = &nodeConfigs[0].k_workload;
-        if(weight_index == 4)
-            slice = &nodeConfigs[0].w1_workload;
-        if(weight_index == 6)
-            slice = &nodeConfigs[0].w3_workload;
-        if(weight_index == 7)
-            slice = &nodeConfigs[0].wcls_workload;
-
-        executor->loadWeight(opName, opIndex, slice->sliceSize.nBytes, weight);
-        return slice->size.nBytes;
-    } else {
-        for (NnUint nodeIndex = 0; nodeIndex < nNodes; nodeIndex++) {
-
-            if(weight_index == 0)
-                slice = &nodeConfigs[nodeIndex].q_workload;
-            if(weight_index == 1)
-                slice = &nodeConfigs[nodeIndex].k_workload;
-            if(weight_index == 2)
-                slice = &nodeConfigs[nodeIndex].k_workload;
-            if(weight_index == 4)
-                slice = &nodeConfigs[nodeIndex].w1_workload;
-            if(weight_index == 6)
-                slice = &nodeConfigs[nodeIndex].w3_workload;
-            if(weight_index == 7)
-                slice = &nodeConfigs[nodeIndex].wcls_workload;
-
-            allocate(slice->sliceSize.nBytes);
-            splitRowMatmulWeight(slice, nodeConfigs[nodeIndex].sliceOffset, weight, temp);
-            if (nodeIndex == 0)
-                executor->loadWeight(opName, opIndex, slice->sliceSize.nBytes, temp);
-            else
-                writeWeight(nodeIndex, opName, opIndex, slice->sliceSize.nBytes, temp);
-        }
-        return slice->size.nBytes;
-    }
-    
-}
-
-
-
-
-
-/*
 NnSize NnRootWeightLoader::loadColMatmulSlices(const char *opName, NnUint opIndex, NnColMatmulSlice *slice, NnByte *weight) {
     if (nNodes == 1) {
         executor->loadWeight(opName, opIndex, slice->sliceSize.nBytes, weight);
@@ -900,43 +842,6 @@ NnSize NnRootWeightLoader::loadColMatmulSlices(const char *opName, NnUint opInde
     }
     return slice->size.nBytes;
 }
-*/
-
-NnSize NnRootWeightLoader::loadColMatmulSlices(const char *opName, NnUint opIndex, NnNodeConfig *nodeConfigs, NnByte *weight, NnUint weight_index) {
-
-    NnColMatmulSlice *slice = nullptr;
-
-    if (nNodes == 1) {
-
-        if(weight_index == 3)
-            slice = &nodeConfigs[0].wo_workload;
-        if(weight_index == 5)
-            slice = &nodeConfigs[0].w2_workload;
-
-        executor->loadWeight(opName, opIndex, slice->sliceSize.nBytes, weight);
-        return slice->size.nBytes;
-    } else {
-        
-        for (NnUint nodeIndex = 0; nodeIndex < nNodes; nodeIndex++) {
-
-            if(weight_index == 3)
-                slice = &nodeConfigs[nodeIndex].wo_workload;
-            if(weight_index == 5)
-                slice = &nodeConfigs[nodeIndex].w2_workload;
-         
-
-            allocate(slice->sliceSize.nBytes);
-            splitColMatmulWeight(slice, nodeConfigs[nodeIndex].sliceOffset, weight, temp);
-            if (nodeIndex == 0)
-                executor->loadWeight(opName, opIndex, slice->sliceSize.nBytes, temp);
-            else
-                writeWeight(nodeIndex, opName, opIndex, slice->sliceSize.nBytes, temp);
-        }
-    }
-    return slice->size.nBytes;
-}
-
-
 
 NnWorkerWeightReader::NnWorkerWeightReader(NnExecutor *executor, NnNetwork *network) {
     this->executor = executor;

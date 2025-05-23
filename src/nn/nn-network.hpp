@@ -2,9 +2,6 @@
 #define NN_NETWORK_H
 
 #include "nn-executor.hpp"
-//#include "../llm.hpp"
-
-extern NnUint weight_index;
 
 #define ROOT_SOCKET_INDEX 0
 
@@ -109,10 +106,8 @@ public:
     void writeWeight(NnUint nodeIndex, const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight);
     NnSize loadRoot(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight);
     NnSize loadAll(const char *opName, NnUint opIndex, NnSize nBytes, NnByte *weight);
-    //NnSize loadRowMatmulSlices(const char *opName, NnUint opIndex, NnRowMatmulSlice *slice, NnByte *weight);
-    NnSize loadRowMatmulSlices(const char *opName, NnUint opIndex, NnNodeConfig *nodeConfigs, NnByte *weight, NnUint weight_index);
-    //NnSize loadColMatmulSlices(const char *opName, NnUint opIndex, NnColMatmulSlice *slice, NnByte *weight);
-    NnSize loadColMatmulSlices(const char *opName, NnUint opIndex, NnNodeConfig *nodeConfigs, NnByte *weight, NnUint weight_index);
+    NnSize loadRowMatmulSlices(const char *opName, NnUint opIndex, NnRowMatmulSlice *slice, NnByte *weight);
+    NnSize loadColMatmulSlices(const char *opName, NnUint opIndex, NnColMatmulSlice *slice, NnByte *weight);
     void finish();
 private:
     void allocate(NnSize size);};

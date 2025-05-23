@@ -89,6 +89,5 @@ typedef struct {
 
 void runInferenceApp(AppCliArgs *args, void (*handler)(AppInferenceContext *context));
 void runWorkerApp(AppCliArgs *args);
-void runTestnode(AppCliArgs *args, void (*handler)(AppInferenceContext *context));
 
 #endif

@@ -213,53 +213,6 @@ static void chat(AppInferenceContext *context) {
     printf("(end of context)\n");
 }
 
-/*--------------------------------------------------------------------------------------------
-    test
-
-----------------------------------------------------------------------------------------------*/
-/*
-static void test(AppInferenceContext *context) {
-    const int token = 9906;  
-    const NnUint nTokens = 1;  
-    const NnUint nBatches = 1;
-
-    printf("🧪 Test Mode: Forward %u tokens (token=%d), batch size = %u\n", nTokens, token, nBatches);
-
-    NnSize sentBytes = 0;
-    NnSize recvBytes = 0;
-    NnUint evalTotalTime = 0;
-
-    NnUint pos = 0;
-
-        NnUint batchSize = std::min(nBatches, nTokens - pos);
-
-        context->inference->setBatchSize(batchSize);
-        context->inference->setPosition(pos);
-        context->inference->setToken(0, token);
-
-        context->inference->forward();
-
-        NnUint testTime = context->executor->getTotalTime(STEP_EXECUTE_OP);
-        float invTime = (testTime > 0.0f) ? (1.0f / (testTime / 1000)) : 0.0f;
-
-        printf("🔷 Test %3u ms | Tokens %2u\n", testTime / 1000, batchSize);
-        printf("🔷 Vd %.5f ms⁻¹", invTime);
-
-        evalTotalTime += testTime;
-        pos += batchSize;
-    
-
-    float evalTotalTimeMs = evalTotalTime / 1000.0f;
-    printf("\nSummary:\n");
-    printf("   Total Tokens: %u\n", nTokens);
-    printf("   Total Time:   %.2f ms\n", evalTotalTimeMs);
-    printf("   Tokens/sec:   %.2f\n", (nTokens * 1000) / evalTotalTimeMs);
-    printf("   Time/token:   %.2f ms\n", evalTotalTimeMs / nTokens);
-}
-*/
-
-//---------------------------------------------------------------------------------------------
-
 int main(int argc, char **argv) {
     initQuants();
     initSockets();
@@ -274,10 +227,6 @@ int main(int argc, char **argv) {
             runInferenceApp(&args, &chat);
         else if (std::strcmp(args.mode, "worker") == 0)
             runWorkerApp(&args);
-        /*
-        else if (std::strcmp(args.mode, "test") == 0)
-            runTestnode(&args, &test);
-        */
         else
             throw std::runtime_error("Unsupported mode");
     } catch (std::exception &e) {

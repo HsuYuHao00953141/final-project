@@ -29,7 +29,6 @@ typedef struct {
     NnFloatType type;
     NnUint nNodes;
     NnUint d0;
-    NnUint d;
     NnUint n;
     NnSize2D size;
     NnSize2D sliceSize;
@@ -178,21 +177,6 @@ typedef struct {
 
 typedef struct {
     NnUint nodeIndex;
-    //slicedisbribution
-    NnKvCacheSlice KvCacheSlice_disbribution;
-    NnMultiHeadAttSlice multiHeadAttSlice_disbribution;
-    //nodeWorkload
-    NnRowMatmulSlice q_workload;
-    NnRowMatmulSlice k_workload;
-    NnRowMatmulSlice v_workload;
-    NnColMatmulSlice wo_workload;
-    NnRowMatmulSlice w1_workload;
-    NnColMatmulSlice w2_workload;
-    NnRowMatmulSlice w3_workload;
-    NnRowMatmulSlice wcls_workload;
-
-    NnUint sliceOffset;
-    
     NnUint nBuffers;
     NnBufferConfig *buffers;
     NnUint nSegments;
