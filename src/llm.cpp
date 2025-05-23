@@ -6,8 +6,6 @@
 #include "llm.hpp"
 #include <stdexcept>
 
-#include "nn/workload-distribution.hpp"
-
 static const char *hiddenActToString(LlmHiddenAct act) {
     if (act == HIDDEN_ACT_GELU) return "Gelu";
     if (act == HIDDEN_ACT_SILU) return "Silu";
@@ -127,32 +125,21 @@ void printLlmHeader(LlmHeader *header) {
 
 LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
     LlmNet n;
-
-    //distribute_mode = 1;
-
     n.tokenEmbeddingSize = size2D(F_32, h->vocabSize, h->dim);
     n.rmsNormSize = size1D(F_32, h->dim);
-    
-    if(!distribute_mode){
-        nSlice = nNodes;
-    }
-    else{
-        nSlice = 8;
-    }
-    
-    //NnKvCacheSlice kvCacheSlice = sliceKvCache(h->kvDim, h->seqLen, nNode);
-    NnKvCacheSlice kvCacheSlice = sliceKvCache(h->kvDim, h->seqLen, nSlice);
-    NnMultiHeadAttSlice multiHeadAttSlice = sliceMultiHeadAtt(h->nHeads, h->seqLen, nSlice, nBatches);
-    
-    n.qSlice = sliceRowMatmul(h->weightType, nSlice, h->dim, h->dim);
-    n.kSlice = sliceRowMatmul(h->weightType, nSlice, h->dim, h->kvDim);
-    n.vSlice = sliceRowMatmul(h->weightType, nSlice, h->dim, h->kvDim);
-    n.woSlice = sliceColMatmul(h->weightType, nSlice, h->dim, h->dim);
 
-    n.w1Slice = sliceRowMatmul(h->weightType, nSlice, h->dim, h->hiddenDim);
-    n.w2Slice = sliceColMatmul(h->weightType, nSlice, h->hiddenDim, h->dim);
-    n.w3Slice = sliceRowMatmul(h->weightType, nSlice, h->dim, h->hiddenDim);
-    n.wclsSlice = sliceRowMatmul(h->weightType, nSlice, h->dim, h->vocabSize);
+    NnKvCacheSlice kvCacheSlice = sliceKvCache(h->kvDim, h->seqLen, nNodes);
+    NnMultiHeadAttSlice multiHeadAttSlice = sliceMultiHeadAtt(h->nHeads, h->seqLen, nNodes, nBatches);
+
+    n.qSlice = sliceRowMatmul(h->weightType, nNodes, h->dim, h->dim);
+    n.kSlice = sliceRowMatmul(h->weightType, nNodes, h->dim, h->kvDim);
+    n.vSlice = sliceRowMatmul(h->weightType, nNodes, h->dim, h->kvDim);
+    n.woSlice = sliceColMatmul(h->weightType, nNodes, h->dim, h->dim);
+
+    n.w1Slice = sliceRowMatmul(h->weightType, nNodes, h->dim, h->hiddenDim);
+    n.w2Slice = sliceColMatmul(h->weightType, nNodes, h->hiddenDim, h->dim);
+    n.w3Slice = sliceRowMatmul(h->weightType, nNodes, h->dim, h->hiddenDim);
+    n.wclsSlice = sliceRowMatmul(h->weightType, nNodes, h->dim, h->vocabSize);
 
     NnNetConfigBuilder netBuilder(nNodes, nBatches);
 
@@ -168,58 +155,8 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
     n.netConfig = netBuilder.build();
     n.nodeConfigs = new NnNodeConfig[nNodes];
 
-    std::vector<NnUint> partitionDist = {3, 2, 2, 1};
-
     for (NnUint nodeIndex = 0; nodeIndex < nNodes; nodeIndex++) {
-
-        /*-------------------------------------------------------------
-                workload 分配
-        -------------------------------------------------------------*/
-        
-        if(!distribute_mode){
-            n.nodeConfigs[nodeIndex].KvCacheSlice_disbribution = kvCacheSlice; //還沒修改 Related buffer, config
-            n.nodeConfigs[nodeIndex].multiHeadAttSlice_disbribution = multiHeadAttSlice;
-
-            n.nodeConfigs[nodeIndex].q_workload = n.qSlice;
-            n.nodeConfigs[nodeIndex].k_workload = n.kSlice;
-            n.nodeConfigs[nodeIndex].v_workload = n.vSlice;
-            n.nodeConfigs[nodeIndex].wo_workload = n.woSlice;
-            n.nodeConfigs[nodeIndex].w1_workload = n.w1Slice;
-            n.nodeConfigs[nodeIndex].w2_workload = n.w2Slice;
-            n.nodeConfigs[nodeIndex].w3_workload = n.w3Slice;
-            n.nodeConfigs[nodeIndex].wcls_workload = n.wclsSlice;
-        }
-        else{
-            n.nodeConfigs[nodeIndex].KvCacheSlice_disbribution = sliceKvCache_distribute(partitionDist[nodeIndex], h->seqLen, kvCacheSlice);
-            n.nodeConfigs[nodeIndex].multiHeadAttSlice_disbribution = sliceMultiHeadAtt_distribute(h->nHeads, h->seqLen, partitionDist[nodeIndex], nBatches, multiHeadAttSlice);;
-
-            n.nodeConfigs[nodeIndex].q_workload = workload_rowslicedistribute(partitionDist[nodeIndex], n.qSlice);
-            n.nodeConfigs[nodeIndex].k_workload = workload_rowslicedistribute(partitionDist[nodeIndex], n.kSlice);
-            n.nodeConfigs[nodeIndex].v_workload = workload_rowslicedistribute(partitionDist[nodeIndex], n.vSlice);
-            n.nodeConfigs[nodeIndex].wo_workload = workload_colslicedistribute(partitionDist[nodeIndex], n.woSlice);
-            n.nodeConfigs[nodeIndex].w1_workload = workload_rowslicedistribute(partitionDist[nodeIndex], n.w1Slice);
-            n.nodeConfigs[nodeIndex].w2_workload = workload_colslicedistribute(partitionDist[nodeIndex], n.w2Slice);
-            n.nodeConfigs[nodeIndex].w3_workload = workload_rowslicedistribute(partitionDist[nodeIndex], n.w3Slice);
-            n.nodeConfigs[nodeIndex].wcls_workload = workload_rowslicedistribute(partitionDist[nodeIndex], n.wclsSlice);
-        }
-        
-        NnRopeSlice ropeSlice;
-        NnUint sliceOffset = 0;
-        if(!distribute_mode){
-            ropeSlice = sliceRope(h->dim, h->kvDim, h->nKvHeads, nNodes, h->seqLen, h->headSize, h->ropeTheta, nodeIndex);
-            n.nodeConfigs[nodeIndex].sliceOffset = nodeIndex;
-        }
-        else{
-            for (NnUint i = 0; i < nodeIndex; ++i)
-                sliceOffset += partitionDist[i];
-
-            NnUint sliceCount = partitionDist[nodeIndex];
-            ropeSlice = sliceRope_distribute(h->dim, h->kvDim, h->nKvHeads, h->seqLen, h->headSize, h->ropeTheta, sliceOffset, sliceCount, nSlice);
-            n.nodeConfigs[nodeIndex].sliceOffset = sliceOffset;
-        }
-
-        //NnRopeSlice ropeSlice = sliceRope(h->dim, h->kvDim, h->nKvHeads, nNodes, h->seqLen, h->headSize, h->ropeTheta, nodeIndex);
-    
+        NnRopeSlice ropeSlice = sliceRope(h->dim, h->kvDim, h->nKvHeads, nNodes, h->seqLen, h->headSize, h->ropeTheta, nodeIndex);
         NnNodeConfigBuilder nodeBuilder(nodeIndex);
 
         const NnUint xBufferIndex = nodeBuilder.addBuffer("x", size2D(F_32, nBatches, h->dim));
@@ -228,43 +165,21 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
         const NnUint yqBufferIndex = h->syncType == F_32
             ? yBufferIndex
             : nodeBuilder.addBuffer("yq", size2D(h->syncType, nBatches, h->dim));
+        const NnUint yqSliceIndex = nodeBuilder.addBuffer("yq_slice", size2D(h->syncType, nBatches, h->dim / nNodes));
 
-        if(!distribute_mode){
-            yqSlice_dim = h->dim / nNodes;
-        }
-        else{
-            yqSlice_dim = (h->dim / nSlice) * partitionDist[nodeIndex];
-        }
+        const NnUint qBufferIndex = nodeBuilder.addBuffer("q", size2D(F_32, nBatches, n.qSlice.d0));
+        const NnUint kTempBufferIndex = nodeBuilder.addBuffer("k_temp", size2D(F_32, nBatches, n.kSlice.d0));
+        const NnUint vTempBufferIndex = nodeBuilder.addBuffer("v_temp", size2D(F_32, nBatches, n.vSlice.d0));
 
-        //const NnUint yqSliceIndex = nodeBuilder.addBuffer("yq_slice", size2D(h->syncType, nBatches, h->dim / nNodes));
-        const NnUint yqSliceIndex = nodeBuilder.addBuffer("yq_slice", size2D(h->syncType, nBatches, yqSlice_dim));
-        //const NnUint qBufferIndex = nodeBuilder.addBuffer("q", size2D(F_32, nBatches, n.qSlice.d0));
-        const NnUint qBufferIndex = nodeBuilder.addBuffer("q", size2D(F_32, nBatches, n.nodeConfigs[nodeIndex].q_workload.d0));
-        //const NnUint kTempBufferIndex = nodeBuilder.addBuffer("k_temp", size2D(F_32, nBatches, n.kSlice.d0));
-        const NnUint kTempBufferIndex = nodeBuilder.addBuffer("k_temp", size2D(F_32, nBatches, n.nodeConfigs[nodeIndex].k_workload.d0));
-        //const NnUint vTempBufferIndex = nodeBuilder.addBuffer("v_temp", size2D(F_32, nBatches, n.vSlice.d0));
-        const NnUint vTempBufferIndex = nodeBuilder.addBuffer("v_temp", size2D(F_32, nBatches, n.nodeConfigs[nodeIndex].v_workload.d0));
-
-        //const NnUint dBufferIndex = nodeBuilder.addBuffer("d", size2D(F_32, nBatches, n.w1Slice.d0));
-        const NnUint dBufferIndex = nodeBuilder.addBuffer("d", size2D(F_32, nBatches, n.nodeConfigs[nodeIndex].w1_workload.d0));
+        const NnUint dBufferIndex = nodeBuilder.addBuffer("d", size2D(F_32, nBatches, n.w1Slice.d0));
         const NnUint dqBufferIndex = h->syncType == F_32
             ? dBufferIndex
-            : nodeBuilder.addBuffer("d", size2D(h->syncType, nBatches, n.nodeConfigs[nodeIndex].w1_workload.d0));
-        //const NnUint lBufferIndex = nodeBuilder.addBuffer("l", size2D(F_32, nBatches, n.w3Slice.d0));
-        const NnUint lBufferIndex = nodeBuilder.addBuffer("l", size2D(F_32, nBatches, n.nodeConfigs[nodeIndex].w3_workload.d0));
+            : nodeBuilder.addBuffer("d", size2D(h->syncType, nBatches, n.w1Slice.d0));
+        const NnUint lBufferIndex = nodeBuilder.addBuffer("l", size2D(F_32, nBatches, n.w3Slice.d0));
         const NnUint invRmsBufferIndex = nodeBuilder.addBuffer("inv_rms", size2D(F_32, nBatches, 1));
         const NnUint ropeCacheBufferIndex = nodeBuilder.addBuffer("rope_cache", ropeSlice.cacheSize);
-        const NnUint attBufferIndex = nodeBuilder.addBuffer("att", n.nodeConfigs[nodeIndex].multiHeadAttSlice_disbribution.attSize);
-
-        if(!distribute_mode){
-            logitsSlice_dim = h->vocabSize / nNodes;
-        }
-        else{
-            logitsSlice_dim = (h->vocabSize / nSlice) * partitionDist[nodeIndex];
-        }
-
-        //const NnUint logitsSliceBufferIndex = nodeBuilder.addBuffer("lg", size2D(F_32, nBatches, h->vocabSize / nNodes));
-        const NnUint logitsSliceBufferIndex = nodeBuilder.addBuffer("lg", size2D(F_32, nBatches, logitsSlice_dim));
+        const NnUint attBufferIndex = nodeBuilder.addBuffer("att", multiHeadAttSlice.attSize);
+        const NnUint logitsSliceBufferIndex = nodeBuilder.addBuffer("lg", size2D(F_32, nBatches, h->vocabSize / nNodes));
 
         NnSegmentConfigBuilder start;
         if (nodeIndex == 0) {
@@ -279,8 +194,8 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
         nodeBuilder.addSegment(start.build());
 
         for (NnUint layerIndex = 0; layerIndex < h->nLayers; layerIndex++) {
-            const NnUint kBufferIndex = nodeBuilder.addBuffer("k", n.nodeConfigs[nodeIndex].KvCacheSlice_disbribution.keySize);
-            const NnUint vBufferIndex = nodeBuilder.addBuffer("v", n.nodeConfigs[nodeIndex].KvCacheSlice_disbribution.valueSize);
+            const NnUint kBufferIndex = nodeBuilder.addBuffer("k", kvCacheSlice.keySize);
+            const NnUint vBufferIndex = nodeBuilder.addBuffer("v", kvCacheSlice.valueSize);
 
             NnSegmentConfigBuilder att;
             NnSegmentConfigBuilder ff;
@@ -326,19 +241,19 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
                 OP_MATMUL, "block_matmul_q", layerIndex,
                 pointerBatchConfig(SRC_BUFFER, yqBufferIndex),
                 pointerBatchConfig(SRC_BUFFER, qBufferIndex),
-                size2D(h->weightType, n.nodeConfigs[nodeIndex].q_workload.n, n.nodeConfigs[nodeIndex].q_workload.d0),
+                size2D(h->weightType, n.qSlice.n, n.qSlice.d0),
                 NnMatmulOpConfig{});
             att.addOp(
                 OP_MATMUL, "block_matmul_k", layerIndex,
                 pointerBatchConfig(SRC_BUFFER, yqBufferIndex),
                 pointerBatchConfig(SRC_BUFFER, kTempBufferIndex),
-                size2D(h->weightType, n.nodeConfigs[nodeIndex].k_workload.n, n.nodeConfigs[nodeIndex].k_workload.d0),
+                size2D(h->weightType, n.kSlice.n, n.kSlice.d0),
                 NnMatmulOpConfig{});
             att.addOp(
                 OP_MATMUL, "block_matmul_v", layerIndex,
                 pointerBatchConfig(SRC_BUFFER, yqBufferIndex),
                 pointerBatchConfig(SRC_BUFFER, vTempBufferIndex),
-                size2D(h->weightType, n.nodeConfigs[nodeIndex].v_workload.n, n.nodeConfigs[nodeIndex].v_workload.d0),
+                size2D(h->weightType, n.vSlice.n, n.vSlice.d0),
                 NnMatmulOpConfig{});
 
             att.addOp(
@@ -375,8 +290,8 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
                 pointerBatchedSliceConfig(SRC_BUFFER, yBufferIndex),
                 size0(),
                 NnMultiHeadAttOpConfig{
-                    n.nodeConfigs[nodeIndex].multiHeadAttSlice_disbribution.nHeads, n.nodeConfigs[nodeIndex].multiHeadAttSlice_disbribution.nHeads0,
-                    h->nKvHeads, h->headSize, h->seqLen, n.nodeConfigs[nodeIndex].q_workload.d0, n.nodeConfigs[nodeIndex].KvCacheSlice_disbribution.kvDim0,
+                    multiHeadAttSlice.nHeads, multiHeadAttSlice.nHeads0,
+                    h->nKvHeads, h->headSize, h->seqLen, n.qSlice.d0, kvCacheSlice.kvDim0,
                     n.positionPipeIndex, qBufferIndex, kBufferIndex, vBufferIndex, attBufferIndex});
             att.addOp(
                 OP_CAST, "block_cast_y2", layerIndex,
@@ -388,7 +303,7 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
                 OP_MATMUL, "block_matmul_wo", layerIndex,
                 pointerBatchConfig(SRC_BUFFER, yqSliceIndex),
                 pointerBatchConfig(SRC_BUFFER, yBufferIndex),
-                size2D(h->weightType, n.nodeConfigs[nodeIndex].wo_workload.n0, n.nodeConfigs[nodeIndex].wo_workload.d),
+                size2D(h->weightType, n.woSlice.n0, n.woSlice.d),
                 NnMatmulOpConfig{});
             att.addOp(
                 OP_CAST, "block_cast_d", layerIndex,
@@ -429,13 +344,13 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
                 OP_MATMUL, "block_matmul_w1", layerIndex,
                 pointerBatchConfig(SRC_BUFFER, yqBufferIndex),
                 pointerBatchConfig(SRC_BUFFER, dBufferIndex),
-                size2D(h->weightType, n.nodeConfigs[nodeIndex].w1_workload.n, n.nodeConfigs[nodeIndex].w1_workload.d0),
+                size2D(h->weightType, n.w1Slice.n, n.w1Slice.d0),
                 NnMatmulOpConfig{});
             ff.addOp(
                 OP_MATMUL, "block_matmul_w3", layerIndex,
                 pointerBatchConfig(SRC_BUFFER, yqBufferIndex),
                 pointerBatchConfig(SRC_BUFFER, lBufferIndex),
-                size2D(h->weightType, n.nodeConfigs[nodeIndex].w3_workload.n, n.nodeConfigs[nodeIndex].w3_workload.d0),
+                size2D(h->weightType, n.w3Slice.n, n.w3Slice.d0),
                 NnMatmulOpConfig{});
             ff.addOp(
                 OP_SILU, "block_act", layerIndex,
@@ -461,7 +376,7 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
                 OP_MATMUL, "block_matmul_w2", layerIndex,
                 pointerBatchConfig(SRC_BUFFER, dqBufferIndex),
                 pointerBatchConfig(SRC_BUFFER, yBufferIndex),
-                size2D(h->weightType, n.nodeConfigs[nodeIndex].w2_workload.n0, n.nodeConfigs[nodeIndex].w2_workload.d),
+                size2D(h->weightType, n.w2Slice.n0, n.w2Slice.d),
                 NnMatmulOpConfig{});
             ff.addOp(
                 OP_CAST, "block_cast_d3", layerIndex,
@@ -506,7 +421,7 @@ LlmNet buildLlmNet(LlmHeader *h, NnUint nNodes, NnUint nBatches) {
             OP_MATMUL, "final_matmul_logits", 0,
             pointerBatchConfig(SRC_BUFFER, yqBufferIndex),
             pointerBatchConfig(SRC_BUFFER, logitsSliceBufferIndex),
-            size2D(h->weightType, n.nodeConfigs[nodeIndex].wcls_workload.n, n.nodeConfigs[nodeIndex].wcls_workload.d0),
+            size2D(h->weightType, n.wclsSlice.n, n.wclsSlice.d0),
             NnMatmulOpConfig{});
         end.addOp(
             OP_CAST, "final_cast_logits", 0,
@@ -545,27 +460,6 @@ void loadLlmNetWeight(const char *path, LlmNet *net, NnRootWeightLoader *loader)
     b += loader->loadRoot("embedding", 0, net->tokenEmbeddingSize.nBytes, b);
 
     for (NnUint layerIndex = 0; layerIndex < net->header->nLayers; layerIndex++) {
-        /*
-            weight_index
-            q/rowslice:    0
-            k/rowslice:    1
-            v/rowslice:    2
-            wo/colslice:   3
-            w1/rowslice:   4
-            w2/colslice:   5
-            w3/rowslice:   6
-            wcls/rowslice: 7
-        */
-        
-        b += loader->loadRowMatmulSlices("block_matmul_q", layerIndex, net->nodeConfigs, b, 0);
-        b += loader->loadRowMatmulSlices("block_matmul_k", layerIndex, net->nodeConfigs, b, 1);
-        b += loader->loadRowMatmulSlices("block_matmul_v", layerIndex, net->nodeConfigs, b, 2);
-        b += loader->loadColMatmulSlices("block_matmul_wo", layerIndex, net->nodeConfigs, b, 3);
-        b += loader->loadRowMatmulSlices("block_matmul_w1", layerIndex, net->nodeConfigs, b, 4);
-        b += loader->loadColMatmulSlices("block_matmul_w2", layerIndex, net->nodeConfigs, b, 5);
-        b += loader->loadRowMatmulSlices("block_matmul_w3", layerIndex, net->nodeConfigs, b, 6);
-        
-        /*
         b += loader->loadRowMatmulSlices("block_matmul_q", layerIndex, &net->qSlice, b);
         b += loader->loadRowMatmulSlices("block_matmul_k", layerIndex, &net->kSlice, b);
         b += loader->loadRowMatmulSlices("block_matmul_v", layerIndex, &net->vSlice, b);
@@ -575,13 +469,10 @@ void loadLlmNetWeight(const char *path, LlmNet *net, NnRootWeightLoader *loader)
         b += loader->loadRowMatmulSlices("block_matmul_w3", layerIndex, &net->w3Slice, b);
         b += loader->loadAll("block_rms_norm_0", layerIndex, net->rmsNormSize.nBytes, b);
         b += loader->loadAll("block_rms_norm_1", layerIndex, net->rmsNormSize.nBytes, b);
-        */
-
     }
 
     b += loader->loadAll("final_rms_norm", 0, net->rmsNormSize.nBytes, b);
-    //b += loader->loadRowMatmulSlices("final_matmul_logits", 0, &net->wclsSlice, b);
-    b += loader->loadRowMatmulSlices("final_matmul_logits", 0, net->nodeConfigs, b, 7);
+    b += loader->loadRowMatmulSlices("final_matmul_logits", 0, &net->wclsSlice, b);
 
     long long missingBytes = (long long)(b - data) - net->header->fileSize;
     if (missingBytes != 0)
